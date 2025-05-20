@@ -1,0 +1,467 @@
+- SGRL (Système de Gestion des Résultats de Laboratoire) Schema
+-- Version: 1.0
+-- Date: 2024
+
+-- Create database with proper encoding
+CREATE DATABASE IF NOT EXISTS sgrl_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE sgrl_db;
+
+-- Enable stored procedures
+DELIMITER //
+
+-- =============================================
+-- Table Creation Section
+-- =============================================
+
+-- Table des patients
+CREATE TABLE IF NOT EXISTS Patients (
+    id_patient INT PRIMARY KEY AUTO_INCREMENT,
+    nom VARCHAR(50) NOT NULL,
+    prenom VARCHAR(50) NOT NULL,
+    date_naissance DATE NOT NULL,
+    sexe ENUM('M','F','Autre') NOT NULL,
+    adresse TEXT,
+    code_postal VARCHAR(10),
+    ville VARCHAR(50),
+    pays VARCHAR(50) DEFAULT 'France',
+    telephone VARCHAR(20) UNIQUE,
+    email VARCHAR(100) UNIQUE,
+    num_securite_sociale VARCHAR(20) UNIQUE,
+    num_dossier_medical VARCHAR(50) UNIQUE,
+    groupe_sanguin ENUM('A+','A-','B+','B-','AB+','AB-','O+','O-'),
+    date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    date_modification TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_nom_prenom (nom, prenom),
+    INDEX idx_dossier (num_dossier_medical)
+)//
+
+-- Table des utilisateurs
+CREATE TABLE IF NOT EXISTS Utilisateurs (
+    id_utilisateur INT PRIMARY KEY AUTO_INCREMENT,
+    nom VARCHAR(50) NOT NULL,
+    prenom VARCHAR(50) NOT NULL,
+    email VARCHAR(100) UNIQUE NOT NULL,
+    mot_de_passe VARCHAR(255) NOT NULL,
+    role ENUM('Admin','Médecin','Laborantin','Biologiste') NOT NULL,
+    specialite VARCHAR(100),
+    num_ordre VARCHAR(50) UNIQUE,
+    telephone VARCHAR(20),
+    actif BOOLEAN DEFAULT TRUE,
+    derniere_connexion TIMESTAMP,
+    date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_role (role),
+    INDEX idx_email (email)
+)//
+
+-- Table des médecins
+CREATE TABLE IF NOT EXISTS Medecins (
+    id_medecin INT PRIMARY KEY AUTO_INCREMENT,
+    id_utilisateur INT NOT NULL,
+    specialite VARCHAR(100) NOT NULL,
+    num_rpps VARCHAR(50) UNIQUE NOT NULL,
+    adresse_cabinet TEXT,
+    telephone_cabinet VARCHAR(20),
+    FOREIGN KEY (id_utilisateur) REFERENCES Utilisateurs(id_utilisateur) ON DELETE RESTRICT,
+    INDEX idx_specialite (specialite)
+)//
+
+-- Table des catégories d'analyses
+CREATE TABLE IF NOT EXISTS Categories_Analyses (
+    id_categorie INT PRIMARY KEY AUTO_INCREMENT,
+    nom_categorie VARCHAR(100) NOT NULL UNIQUE,
+    description TEXT,
+    code_categorie VARCHAR(20) UNIQUE
+)//
+
+-- Table des analyses
+CREATE TABLE IF NOT EXISTS Analyses (
+    id_analyse INT PRIMARY KEY AUTO_INCREMENT,
+    id_categorie INT,
+    code_analyse VARCHAR(20) UNIQUE NOT NULL,
+    nom_analyse VARCHAR(100) NOT NULL,
+    description TEXT,
+    methode_analyse VARCHAR(100),
+    unite_mesure VARCHAR(20) NOT NULL,
+    valeur_normale_min_homme FLOAT,
+    valeur_normale_max_homme FLOAT,
+    valeur_normale_min_femme FLOAT,
+    valeur_normale_max_femme FLOAT,
+    delai_execution INT,
+    prix DECIMAL(10,2),
+    jeune_requis BOOLEAN DEFAULT FALSE,
+    instructions_speciales TEXT,
+    actif BOOLEAN DEFAULT TRUE,
+    FOREIGN KEY (id_categorie) REFERENCES Categories_Analyses(id_categorie) ON DELETE SET NULL,
+    INDEX idx_code (code_analyse),
+    INDEX idx_nom (nom_analyse)
+)//
+
+-- Table des demandes d'analyses
+CREATE TABLE IF NOT EXISTS Demandes_Analyses (
+    id_demande INT PRIMARY KEY AUTO_INCREMENT,
+    id_patient INT NOT NULL,
+    id_medecin INT NOT NULL,
+    date_demande TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    date_prelevement DATETIME,
+    priorite ENUM('Normal','Urgent','Très urgent') DEFAULT 'Normal',
+    statut ENUM('En attente','Prélèvement effectué','En cours d''analyse','Validé','Communiqué','Annulé') DEFAULT 'En attente',
+    commentaire_medecin TEXT,
+    num_bon_commande VARCHAR(50),
+    FOREIGN KEY (id_patient) REFERENCES Patients(id_patient) ON DELETE RESTRICT,
+    FOREIGN KEY (id_medecin) REFERENCES Medecins(id_medecin) ON DELETE RESTRICT,
+    INDEX idx_patient (id_patient),
+    INDEX idx_date (date_demande),
+    INDEX idx_statut (statut)
+)//
+
+-- Table des détails de demandes d'analyses
+CREATE TABLE IF NOT EXISTS Demandes_Analyses_Details (
+    id_detail INT PRIMARY KEY AUTO_INCREMENT,
+    id_demande INT NOT NULL,
+    id_analyse INT NOT NULL,
+    statut ENUM('En attente','En cours','Terminé','Annulé') DEFAULT 'En attente',
+    laborantin_assigne INT,
+    FOREIGN KEY (id_demande) REFERENCES Demandes_Analyses(id_demande) ON DELETE CASCADE,
+    FOREIGN KEY (id_analyse) REFERENCES Analyses(id_analyse) ON DELETE RESTRICT,
+    FOREIGN KEY (laborantin_assigne) REFERENCES Utilisateurs(id_utilisateur) ON DELETE SET NULL,
+    INDEX idx_demande (id_demande),
+    INDEX idx_analyse (id_analyse),
+    INDEX idx_statut (statut)
+)//
+
+-- Table des résultats d'analyses
+CREATE TABLE IF NOT EXISTS Resultats_Analyses (
+    id_resultat INT PRIMARY KEY AUTO_INCREMENT,
+    id_detail INT NOT NULL,
+    valeur_mesuree FLOAT NOT NULL,
+    date_realisation DATETIME NOT NULL,
+    date_validation_technique DATETIME,
+    date_validation_biologique DATETIME,
+    id_validateur_technique INT,
+    id_validateur_biologique INT,
+    commentaire_technique TEXT,
+    commentaire_medical TEXT,
+    est_anormal BOOLEAN,
+    est_critique BOOLEAN DEFAULT FALSE,
+    FOREIGN KEY (id_detail) REFERENCES Demandes_Analyses_Details(id_detail) ON DELETE CASCADE,
+    FOREIGN KEY (id_validateur_technique) REFERENCES Utilisateurs(id_utilisateur) ON DELETE SET NULL,
+    FOREIGN KEY (id_validateur_biologique) REFERENCES Utilisateurs(id_utilisateur) ON DELETE SET NULL,
+    INDEX idx_detail (id_detail),
+    INDEX idx_date (date_realisation),
+    INDEX idx_anormal (est_anormal)
+)//
+
+-- Table des échantillons
+CREATE TABLE IF NOT EXISTS Echantillons (
+    id_echantillon INT PRIMARY KEY AUTO_INCREMENT,
+    id_demande INT NOT NULL,
+    code_barre VARCHAR(50) UNIQUE,
+    type_echantillon ENUM('Sang','Urine','Selles','LCR','Autre') NOT NULL,
+    volume FLOAT,
+    date_prelevement DATETIME NOT NULL,
+    preleveur INT,
+    etat ENUM('Conforme','Non conforme') DEFAULT 'Conforme',
+    commentaire TEXT,
+    FOREIGN KEY (id_demande) REFERENCES Demandes_Analyses(id_demande) ON DELETE CASCADE,
+    FOREIGN KEY (preleveur) REFERENCES Utilisateurs(id_utilisateur) ON DELETE SET NULL,
+    INDEX idx_code_barre (code_barre),
+    INDEX idx_type (type_echantillon)
+)//
+
+-- Table de l'historique des accès
+CREATE TABLE IF NOT EXISTS Historique_Acces (
+    id_historique INT PRIMARY KEY AUTO_INCREMENT,
+    id_utilisateur INT,
+    date_action TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    action VARCHAR(50) NOT NULL,
+    table_concernee VARCHAR(50),
+    id_enregistrement INT,
+    details TEXT,
+    adresse_ip VARCHAR(45),
+    FOREIGN KEY (id_utilisateur) REFERENCES Utilisateurs(id_utilisateur) ON DELETE SET NULL,
+    INDEX idx_utilisateur (id_utilisateur),
+    INDEX idx_date (date_action),
+    INDEX idx_action (action)
+)//
+
+-- Table des notifications
+CREATE TABLE IF NOT EXISTS Notifications (
+    id_notification INT PRIMARY KEY AUTO_INCREMENT,
+    id_destinataire INT NOT NULL,
+    type ENUM('Résultat disponible','Demande urgente','Alerte système','Information') NOT NULL,
+    contenu TEXT NOT NULL,
+    date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    date_consultation DATETIME,
+    lue BOOLEAN DEFAULT FALSE,
+    FOREIGN KEY (id_destinataire) REFERENCES Utilisateurs(id_utilisateur) ON DELETE CASCADE,
+    INDEX idx_destinataire (id_destinataire),
+    INDEX idx_type (type),
+    INDEX idx_lue (lue)
+)//
+
+-- =============================================
+-- Views Section
+-- =============================================
+
+-- Vue pour les résultats d'analyses par patient
+CREATE OR REPLACE VIEW vue_resultats_patient AS
+SELECT 
+    p.id_patient,
+    p.nom AS nom_patient,
+    p.prenom AS prenom_patient,
+    p.date_naissance,
+    a.code_analyse,
+    a.nom_analyse,
+    r.valeur_mesuree,
+    a.unite_mesure,
+    r.date_realisation,
+    r.est_anormal,
+    r.est_critique,
+    r.commentaire_medical,
+    m.nom AS nom_medecin,
+    m.prenom AS prenom_medecin
+FROM 
+    Patients p
+    INNER JOIN Demandes_Analyses da ON p.id_patient = da.id_patient
+    INNER JOIN Demandes_Analyses_Details dad ON da.id_demande = dad.id_demande
+    INNER JOIN Resultats_Analyses r ON dad.id_detail = r.id_detail
+    INNER JOIN Analyses a ON dad.id_analyse = a.id_analyse
+    INNER JOIN Medecins med ON da.id_medecin = med.id_medecin
+    INNER JOIN Utilisateurs m ON med.id_utilisateur = m.id_utilisateur//
+
+-- Vue pour les analyses en attente de validation
+CREATE OR REPLACE VIEW vue_analyses_en_attente AS
+SELECT 
+    dad.id_detail,
+    p.nom AS nom_patient,
+    p.prenom AS prenom_patient,
+    a.code_analyse,
+    a.nom_analyse,
+    da.priorite,
+    dad.statut,
+    e.code_barre AS code_echantillon,
+    u.nom AS nom_laborantin,
+    u.prenom AS prenom_laborantin
+FROM 
+    Demandes_Analyses_Details dad
+    INNER JOIN Demandes_Analyses da ON dad.id_demande = da.id_demande
+    INNER JOIN Patients p ON da.id_patient = p.id_patient
+    INNER JOIN Analyses a ON dad.id_analyse = a.id_analyse
+    LEFT JOIN Utilisateurs u ON dad.laborantin_assigne = u.id_utilisateur
+    LEFT JOIN Echantillons e ON da.id_demande = e.id_demande
+WHERE 
+    dad.statut = 'En cours'//
+
+-- Vue pour les statistiques d'analyses par période
+CREATE OR REPLACE VIEW vue_statistiques_analyses AS
+SELECT 
+    DATE_FORMAT(r.date_realisation, '%Y-%m') AS periode,
+    a.id_categorie,
+    ca.nom_categorie,
+    COUNT(*) AS nombre_analyses,
+    SUM(CASE WHEN r.est_anormal = TRUE THEN 1 ELSE 0 END) AS nombre_anomalies,
+    ROUND((SUM(CASE WHEN r.est_anormal = TRUE THEN 1 ELSE 0 END) / COUNT(*)) * 100, 2) AS pourcentage_anomalies
+FROM 
+    Resultats_Analyses r
+    INNER JOIN Demandes_Analyses_Details dad ON r.id_detail = dad.id_detail
+    INNER JOIN Analyses a ON dad.id_analyse = a.id_analyse
+    INNER JOIN Categories_Analyses ca ON a.id_categorie = ca.id_categorie
+GROUP BY 
+    periode, a.id_categorie, ca.nom_categorie
+ORDER BY 
+    periode DESC, nombre_analyses DESC//
+
+-- =============================================
+-- Stored Procedures Section
+-- =============================================
+
+-- Procédure pour ajouter une nouvelle demande d'analyse
+CREATE PROCEDURE sp_ajouter_demande_analyse(
+    IN p_id_patient INT,
+    IN p_id_medecin INT,
+    IN p_priorite ENUM('Normal','Urgent','Très urgent'),
+    IN p_commentaire TEXT,
+    IN p_analyses TEXT -- Format: "id_analyse1,id_analyse2,..."
+)
+BEGIN
+    DECLARE v_id_demande INT;
+    DECLARE v_analyse INT;
+    DECLARE v_pos INT;
+    DECLARE v_analyses_restantes TEXT;
+    
+    -- Créer la demande principale
+    INSERT INTO Demandes_Analyses (id_patient, id_medecin, priorite, commentaire_medecin)
+    VALUES (p_id_patient, p_id_medecin, p_priorite, p_commentaire);
+    
+    SET v_id_demande = LAST_INSERT_ID();
+    SET v_analyses_restantes = p_analyses;
+    
+    -- Boucle pour traiter chaque analyse demandée
+    etiquette_boucle: LOOP
+        IF LENGTH(TRIM(v_analyses_restantes)) = 0 THEN
+            LEAVE etiquette_boucle;
+        END IF;
+        
+        SET v_pos = LOCATE(',', v_analyses_restantes);
+        IF v_pos > 0 THEN
+            SET v_analyse = CAST(LEFT(v_analyses_restantes, v_pos - 1) AS UNSIGNED);
+            SET v_analyses_restantes = SUBSTRING(v_analyses_restantes, v_pos + 1);
+        ELSE
+            SET v_analyse = CAST(v_analyses_restantes AS UNSIGNED);
+            SET v_analyses_restantes = '';
+        END IF;
+        
+        -- Ajouter le détail de l'analyse
+        INSERT INTO Demandes_Analyses_Details (id_demande, id_analyse)
+        VALUES (v_id_demande, v_analyse);
+    END LOOP;
+END//
+
+-- Procédure pour valider techniquement un résultat
+CREATE PROCEDURE sp_valider_resultat_technique(
+    IN p_id_resultat INT,
+    IN p_id_validateur INT
+)
+BEGIN
+    UPDATE Resultats_Analyses
+    SET date_validation_technique = NOW(),
+        id_validateur_technique = p_id_validateur
+    WHERE id_resultat = p_id_resultat;
+    
+    -- Mettre à jour le statut du détail de la demande
+    UPDATE Demandes_Analyses_Details dad
+    INNER JOIN Resultats_Analyses ra ON dad.id_detail = ra.id_detail
+    SET dad.statut = 'Terminé'
+    WHERE ra.id_resultat = p_id_resultat;
+END//
+
+-- Procédure pour valider biologiquement un résultat
+CREATE PROCEDURE sp_valider_resultat_biologique(
+    IN p_id_resultat INT,
+    IN p_id_validateur INT,
+    IN p_commentaire_medical TEXT
+)
+BEGIN
+    UPDATE Resultats_Analyses
+    SET date_validation_biologique = NOW(),
+        id_validateur_biologique = p_id_validateur,
+        commentaire_medical = p_commentaire_medical
+    WHERE id_resultat = p_id_resultat;
+    
+    -- Créer une notification pour le médecin prescripteur
+    INSERT INTO Notifications (id_destinataire, type, contenu)
+    SELECT 
+        da.id_medecin,
+        'Résultat disponible',
+        CONCAT('Nouveau résultat disponible pour le patient ', p.nom, ' ', p.prenom)
+    FROM Resultats_Analyses ra
+    INNER JOIN Demandes_Analyses_Details dad ON ra.id_detail = dad.id_detail
+    INNER JOIN Demandes_Analyses da ON dad.id_demande = da.id_demande
+    INNER JOIN Patients p ON da.id_patient = p.id_patient
+    WHERE ra.id_resultat = p_id_resultat;
+END//
+
+-- Procédure pour obtenir l'historique des analyses d'un patient
+CREATE PROCEDURE sp_historique_analyses_patient(
+    IN p_id_patient INT
+)
+BEGIN
+    SELECT 
+        da.date_demande,
+        a.code_analyse,
+        a.nom_analyse,
+        r.valeur_mesuree,
+        a.unite_mesure,
+        r.est_anormal,
+        r.est_critique,
+        r.commentaire_medical,
+        u.nom AS nom_medecin,
+        u.prenom AS prenom_medecin
+    FROM Demandes_Analyses da
+    INNER JOIN Demandes_Analyses_Details dad ON da.id_demande = dad.id_demande
+    INNER JOIN Analyses a ON dad.id_analyse = a.id_analyse
+    INNER JOIN Resultats_Analyses r ON dad.id_detail = r.id_detail
+    INNER JOIN Medecins m ON da.id_medecin = m.id_medecin
+    INNER JOIN Utilisateurs u ON m.id_utilisateur = u.id_utilisateur
+    WHERE da.id_patient = p_id_patient
+    ORDER BY da.date_demande DESC;
+END//
+
+-- Procédure pour rechercher un patient
+CREATE PROCEDURE sp_rechercher_patient(
+    IN p_recherche VARCHAR(100),
+    IN p_type_recherche ENUM('nom', 'dossier', 'telephone')
+)
+BEGIN
+    CASE p_type_recherche
+        WHEN 'nom' THEN
+            SELECT * FROM Patients 
+            WHERE CONCAT(nom, ' ', prenom) LIKE CONCAT('%', p_recherche, '%');
+        WHEN 'dossier' THEN
+            SELECT * FROM Patients 
+            WHERE num_dossier_medical LIKE CONCAT('%', p_recherche, '%');
+        WHEN 'telephone' THEN
+            SELECT * FROM Patients 
+            WHERE telephone LIKE CONCAT('%', p_recherche, '%');
+    END CASE;
+END//
+
+-- Procédure pour générer un rapport médical détaillé
+CREATE PROCEDURE sp_generer_rapport_medical(
+    IN p_id_patient INT,
+    IN p_date_debut DATE,
+    IN p_date_fin DATE
+)
+BEGIN
+    -- Informations du patient
+    SELECT 
+        p.nom,
+        p.prenom,
+        p.date_naissance,
+        p.num_dossier_medical,
+        p.groupe_sanguin
+    FROM Patients p
+    WHERE p.id_patient = p_id_patient;
+
+    -- Résultats des analyses sur la période
+    SELECT 
+        da.date_demande,
+        a.code_analyse,
+        a.nom_analyse,
+        r.valeur_mesuree,
+        a.unite_mesure,
+        CASE 
+            WHEN p.sexe = 'M' AND (r.valeur_mesuree < a.valeur_normale_min_homme OR r.valeur_mesuree > a.valeur_normale_max_homme) THEN 'Anormal'
+            WHEN p.sexe = 'F' AND (r.valeur_mesuree < a.valeur_normale_min_femme OR r.valeur_mesuree > a.valeur_normale_max_femme) THEN 'Anormal'
+            ELSE 'Normal'
+        END AS interpretation,
+        r.commentaire_medical,
+        CONCAT(u.nom, ' ', u.prenom) AS medecin_prescripteur,
+        CONCAT(v.nom, ' ', v.prenom) AS biologiste_validateur
+    FROM Demandes_Analyses da
+    INNER JOIN Demandes_Analyses_Details dad ON da.id_demande = dad.id_demande
+    INNER JOIN Analyses a ON dad.id_analyse = a.id_analyse
+    INNER JOIN Resultats_Analyses r ON dad.id_detail = r.id_detail
+    INNER JOIN Patients p ON da.id_patient = p.id_patient
+    INNER JOIN Medecins m ON da.id_medecin = m.id_medecin
+    INNER JOIN Utilisateurs u ON m.id_utilisateur = u.id_utilisateur
+    LEFT JOIN Utilisateurs v ON r.id_validateur_biologique = v.id_utilisateur
+    WHERE da.id_patient = p_id_patient
+    AND da.date_demande BETWEEN p_date_debut AND p_date_fin
+    ORDER BY da.date_demande DESC;
+
+    -- Statistiques sur la période
+    SELECT 
+        COUNT(DISTINCT da.id_demande) AS nombre_demandes,
+        COUNT(DISTINCT r.id_resultat) AS nombre_analyses,
+        SUM(CASE WHEN r.est_anormal = TRUE THEN 1 ELSE 0 END) AS nombre_resultats_anormaux,
+        COUNT(DISTINCT m.id_medecin) AS nombre_medecins_prescripteurs
+    FROM Demandes_Analyses da
+    INNER JOIN Demandes_Analyses_Details dad ON da.id_demande = dad.id_demande
+    INNER JOIN Resultats_Analyses r ON dad.id_detail = r.id_detail
+    INNER JOIN Medecins m ON da.id_medecin = m.id_medecin
+    WHERE da.id_patient = p_id_patient
+    AND da.date_demande BETWEEN p_date_debut AND p_date_fin;
+END//
+
+DELIMITER ; 
